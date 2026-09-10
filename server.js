@@ -1,4 +1,4 @@
-// MARANATHA GOSPEL — serveur backend
+      // MARANATHA GOSPEL — serveur backend
 // Rôle : sélectionner le verset du matin/soir (liste vérifiée),
 // faire rédiger la méditation et la prière par l'IA à partir de CE verset,
 // stocker le résultat, et envoyer une notification push aux abonnés.
@@ -116,6 +116,48 @@ async function sendNotification(moment, content) {
   }
 }
 
+// --- Endpoint appelé par la page "Questions" : chatbot biblique ---
+app.post("/chat", async (req, res) => {
+  try {
+    const userMessage = (req.body.message || "").slice(0, 500); // limite la longueur
+    if (!userMessage.trim()) {
+      return res.status(400).json({ error: "Message vide" });
+    }
+
+    const systemPrompt = `Tu es l'assistant du site chrétien "MARANATHA GOSPEL". Tu réponds UNIQUEMENT à partir de la Bible et de la foi chrétienne évangélique.
+
+Règles strictes :
+- Réponds en français, avec bienveillance et simplicité.
+- Appuie tes réponses sur la Bible. Si tu cites un verset, indique la référence, mais rappelle à la personne de le vérifier elle-même si tu n'es pas certain à 100% du texte exact.
+- Si la question sort du cadre biblique/spirituel (ex: questions techniques, actualité, autre religion en détail), réponds brièvement et ramène gentiment la conversation vers ce que tu peux faire.
+- Ne donne jamais de conseil médical, juridique ou financier.
+- Reste court : 3 à 8 phrases maximum.`;
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-120b",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.5,
+      }),
+    });
+
+    const data = await response.json();
+    const reply = data.choices[0].message.content.trim();
+    res.json({ reply });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Échec de la réponse", details: err.message });
+  }
+});
+
 // --- Endpoint appelé 2x/jour par cron-job.org ---
 app.post("/generate", async (req, res) => {
   try {
@@ -157,3 +199,4 @@ app.get("/", (req, res) => res.send("MARANATHA GOSPEL — serveur en ligne."));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
+    
