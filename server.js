@@ -1,4 +1,4 @@
-      // MARANATHA GOSPEL — serveur backend
+  // MARANATHA GOSPEL — serveur backend
 // Rôle : sélectionner le verset du matin/soir (liste vérifiée),
 // faire rédiger la méditation et la prière par l'IA à partir de CE verset,
 // stocker le résultat, et envoyer une notification push aux abonnés.
@@ -56,19 +56,30 @@ function pickVerse(moment) {
   return VERSES[index];
 }
 
-// --- L'IA rédige UNIQUEMENT la méditation et la prière, jamais le verset ---
+// --- L'IA rédige la méditation, la prière, une courte prédication et une étude biblique ---
+// Toujours à partir du même verset vérifié — jamais elle n'invente de citation biblique.
 async function generateReflection(moment, verse) {
   const prompt = `Tu écris pour le site chrétien "MARANATHA GOSPEL", en français.
 
-Voici le verset biblique du ${moment === "matin" ? "matin" : "soir"} (ne le modifie pas, ne le recopie pas dans ta réponse) :
+Voici le verset biblique du ${moment === "matin" ? "matin" : "soir"} (ne le modifie pas, ne le recopie pas tel quel dans ta réponse) :
 "${verse.verset}" (${verse.reference})
 
 À partir de ce verset UNIQUEMENT, rédige :
-1. Une méditation de 3 à 5 phrases, simple et encourageante, fidèle au sens du verset.
-2. Une courte prière (3 à 5 phrases) à la première personne du singulier, en lien avec ce verset.
+1. "meditation" : une méditation de 3 à 5 phrases, simple et encourageante.
+2. "priere" : une courte prière (3 à 5 phrases) à la première personne du singulier.
+3. "predication" : une courte prédication de 150 à 250 mots, structurée (introduction, développement, conclusion/appel), fidèle au sens du verset.
+4. "etude" : une étude biblique courte sous forme d'objet avec :
+   - "titre" : un titre court
+   - "points" : un tableau de 3 points clés d'enseignement tirés du verset (chaque point est une phrase)
+   - "application" : une phrase d'application pratique pour la vie quotidienne
 
 Réponds STRICTEMENT en JSON valide, sans aucun texte autour, avec ce format exact :
-{ "meditation": "...", "priere": "..." }`;
+{
+  "meditation": "...",
+  "priere": "...",
+  "predication": "...",
+  "etude": { "titre": "...", "points": ["...", "...", "..."], "application": "..." }
+}`;
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -176,6 +187,8 @@ app.post("/generate", async (req, res) => {
       reference: verse.reference,
       meditation: reflection.meditation,
       priere: reflection.priere,
+      predication: reflection.predication,
+      etude: reflection.etude,
     };
 
     writeToday(content);
@@ -199,4 +212,4 @@ app.get("/", (req, res) => res.send("MARANATHA GOSPEL — serveur en ligne."));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
-    
+        
