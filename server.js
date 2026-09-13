@@ -1,4 +1,4 @@
-  // MARANATHA GOSPEL — serveur backend
+// MARANATHA GOSPEL — serveur backend
 // Rôle : sélectionner le verset du matin/soir (liste vérifiée),
 // faire rédiger la méditation et la prière par l'IA à partir de CE verset,
 // stocker le résultat, et envoyer une notification push aux abonnés.
@@ -28,18 +28,78 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
 const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY; // nouvelle clé "Key" (pas l'ancienne "Basic")
 const GENERATE_SECRET = process.env.GENERATE_SECRET; // mot de passe pour protéger l'endpoint de génération
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN; // token GitHub pour sauvegarder le contenu du jour de façon durable
+const GITHUB_REPO = process.env.GITHUB_REPO; // format "utilisateur/nom-du-repo"
+const GITHUB_FILE_PATH = "data/today.json";
 
-function readToday() {
+// --- Sauvegarde durable sur GitHub ---
+// Le disque du serveur Render (gratuit) est effacé à chaque redémarrage.
+// On sauvegarde donc aussi le contenu du jour sur GitHub, qui ne l'efface jamais.
+async function githubGetFile() {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return null;
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`, {
+    headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub GET a échoué (${res.status})`);
+  const data = await res.json();
+  const content = Buffer.from(data.content, "base64").toString("utf-8");
+  return { sha: data.sha, content: JSON.parse(content) };
+}
+
+async function githubPutFile(newContent, sha) {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return;
+  const body = {
+    message: `Contenu du jour : ${newContent.moment} ${newContent.date}`,
+    content: Buffer.from(JSON.stringify(newContent, null, 2)).toString("base64"),
+  };
+  if (sha) body.sha = sha;
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE_PATH}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`GitHub PUT a échoué (${res.status}) : ${errText}`);
+  }
+}
+
+async function readToday() {
+  // 1. On essaie d'abord le cache local (rapide)
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
   } catch (e) {
+    // 2. Si absent (serveur qui vient de redémarrer), on va le chercher sur GitHub
+    try {
+      const existing = await githubGetFile();
+      if (existing) {
+        fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+        fs.writeFileSync(DATA_FILE, JSON.stringify(existing.content, null, 2));
+        return existing.content;
+      }
+    } catch (err) {
+      console.error("Erreur lecture GitHub:", err.message);
+    }
     return null;
   }
 }
 
-function writeToday(content) {
+async function writeToday(content) {
+  // Cache local (rapide pour les lectures suivantes tant que le serveur tourne)
   fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
   fs.writeFileSync(DATA_FILE, JSON.stringify(content, null, 2));
+  // Sauvegarde durable sur GitHub (survit aux redémarrages)
+  try {
+    const existing = await githubGetFile();
+    await githubPutFile(content, existing ? existing.sha : undefined);
+  } catch (err) {
+    console.error("Erreur sauvegarde GitHub:", err.message);
+  }
 }
 
 // --- Choix du verset : toujours pris dans la liste vérifiée, jamais inventé par l'IA ---
@@ -191,7 +251,7 @@ app.post("/generate", async (req, res) => {
       etude: reflection.etude,
     };
 
-    writeToday(content);
+    await writeToday(content);
     await sendNotification(moment, content);
 
     res.json({ ok: true, content });
@@ -202,8 +262,8 @@ app.post("/generate", async (req, res) => {
 });
 
 // --- Endpoint appelé par le site pour afficher le contenu du jour ---
-app.get("/api/today", (req, res) => {
-  const content = readToday();
+app.get("/api/today", async (req, res) => {
+  const content = await readToday();
   if (!content) return res.status(404).json({ error: "Pas encore de contenu généré" });
   res.json(content);
 });
@@ -212,4 +272,3 @@ app.get("/", (req, res) => res.send("MARANATHA GOSPEL — serveur en ligne."));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
-        
